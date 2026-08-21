@@ -1,0 +1,63 @@
+name: Refatorar site Suellen Rodrigues
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  refactor:
+    if: ${{ !contains(github.event.head_commit.message, 'chore: refatorar estrutura do site') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Separar assets e corrigir menu mobile
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re, base64
+          root=Path('.')
+          html_path=root/'index.html'
+          s=html_path.read_text(encoding='utf-8')
+          css_parts=re.findall(r'<style[^>]*>(.*?)</style>',s,flags=re.I|re.S)
+          js_parts=re.findall(r'<script[^>]*>(.*?)</script>',s,flags=re.I|re.S)
+          (root/'assets/css').mkdir(parents=True,exist_ok=True)
+          (root/'assets/js').mkdir(parents=True,exist_ok=True)
+          (root/'assets/images').mkdir(parents=True,exist_ok=True)
+          def extract_img(ext,out):
+              nonlocal_s=None
+              pat=re.compile(r'<img([^>]+?)src=["\\\']data:image/'+re.escape(ext)+r';base64,([^"\\\']+)["\\\']([^>]*)>',re.I|re.S)
+              m=pat.search(s)
+              if not m:return
+              (root/out).write_bytes(base64.b64decode(m.group(2)))
+              return '<img'+m.group(1)+'src="'+out+'"'+m.group(3)+'>',m.span()
+          for ext,out in [('png','assets/images/logo-inline.png'),('jpeg','assets/images/suellen-hero.jpg'),('jpg','assets/images/suellen-hero.jpg')]:
+              result=extract_img(ext,out)
+              if result:
+                  tag,span=result
+                  s=s[:span[0]]+tag+s[span[1]:]
+          s=re.sub(r'<link[^>]+rel=["\']icon["\'][^>]*data:image/[^>]+>','<link rel="icon" type="image/png" href="favicon.png">',s,count=1,flags=re.I|re.S)
+          css='\n\n'.join(css_parts)+'\n\n/* UX MOBILE PREMIUM */\n.nav-overlay{z-index:95!important;pointer-events:none;touch-action:none}.nav-overlay.open{pointer-events:auto}.mobile-nav{z-index:96!important}@media(max-width:900px){.mobile-nav a{-webkit-tap-highlight-color:transparent}.nav-overlay.open{cursor:pointer}}\n'
+          (root/'assets/css/style.css').write_text(css,encoding='utf-8')
+          js='\n\n'.join(js_parts)+'''\n\n// UX MOBILE PREMIUM\n(function(){\n const burger=document.getElementById('burger'),nav=document.getElementById('mobile-nav'),overlay=document.getElementById('nav-overlay');\n if(!burger||!nav||!overlay)return;\n function closeMenuPremium(){burger.setAttribute('aria-expanded','false');burger.setAttribute('aria-label','Abrir menu');nav.classList.remove('open');overlay.classList.remove('open');document.body.style.overflow='';}\n function openMenuPremium(){burger.setAttribute('aria-expanded','true');burger.setAttribute('aria-label','Fechar menu');nav.classList.add('open');overlay.classList.add('open');document.body.style.overflow='hidden';const first=nav.querySelector('a');if(first)setTimeout(()=>first.focus(),50);}\n burger.addEventListener('click',e=>{e.stopPropagation();nav.classList.contains('open')?closeMenuPremium():openMenuPremium()});\n overlay.addEventListener('pointerdown',closeMenuPremium);\n document.addEventListener('pointerdown',e=>{if(nav.classList.contains('open')&&!nav.contains(e.target)&&!burger.contains(e.target))closeMenuPremium()});\n nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',closeMenuPremium));\n document.addEventListener('keydown',e=>{if(e.key==='Escape'&&nav.classList.contains('open')){closeMenuPremium();burger.focus()}});\n window.addEventListener('resize',()=>{if(window.innerWidth>900)closeMenuPremium()});\n})();\n'''
+          (root/'assets/js/main.js').write_text(js,encoding='utf-8')
+          s=re.sub(r'<style[^>]*>.*?</style>','',s,flags=re.I|re.S)
+          s=s.replace('</head>','  <link rel="stylesheet" href="assets/css/style.css">\n</head>')
+          s=re.sub(r'<script[^>]*>.*?</script>','',s,flags=re.I|re.S)
+          s=s.replace('</body>','  <script src="assets/js/main.js" defer></script>\n</body>')
+          s=s.replace('id="burger" aria-label="Abrir menu" aria-expanded="false"','id="burger" aria-label="Abrir menu" aria-expanded="false" aria-controls="mobile-nav"')
+          html_path.write_text(s,encoding='utf-8')
+          for p in ['suellen-rodrigues-personal-premium (3).html','Assets']:
+              path=Path(p)
+              if path.is_file():path.unlink()
+          (root/'.site-refactored').write_text('Estrutura refatorada automaticamente em GitHub Actions.\n',encoding='utf-8')
+          PY
+      - name: Commitar alterações
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets .site-refactored
+          git rm -f "suellen-rodrigues-personal-premium (3).html" 2>/dev/null || true
+          git rm -f Assets 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "chore: refatorar estrutura do site"
+          git push

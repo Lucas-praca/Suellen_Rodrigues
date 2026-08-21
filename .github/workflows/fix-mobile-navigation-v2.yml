@@ -1,0 +1,117 @@
+name: Fix mobile navigation v2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply exact mobile navigation fix
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          # The mobile media query was overriding the intended 80vw with 88vw.
+          s = s.replace(
+              '.mobile-nav{width:min(88vw,360px);padding-left:24px;padding-right:24px;}',
+              '.mobile-nav{width:min(82vw,340px);padding-left:24px;padding-right:24px;}'
+          )
+
+          # Make the outside area explicitly clickable only when the overlay is open.
+          s = s.replace(
+              '.nav-overlay{display:none; position:fixed; inset:0; background:rgba(42,21,24,.4); z-index:90; opacity:0; transition:opacity .3s ease;}',
+              '.nav-overlay{display:none; position:fixed; inset:0; background:rgba(42,21,24,.4); z-index:90; opacity:0; pointer-events:none; transition:opacity .3s ease;}'
+          )
+          s = s.replace(
+              '.nav-overlay.open{display:block; opacity:1;}',
+              '.nav-overlay.open{display:block; opacity:1; pointer-events:auto;}'
+          )
+
+          # Keep the original menu behavior, adding robust outside-close, scroll lock,
+          # resize cleanup, and reset-to-Hero on reload.
+          old = """  // menu mobile
+  const burger = document.getElementById('burger');
+  const mobileNav = document.getElementById('mobile-nav');
+  const overlay = document.getElementById('nav-overlay');
+  function closeMenu(){
+    burger.setAttribute('aria-expanded','false');
+    burger.setAttribute('aria-label','Abrir menu');
+    mobileNav.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow='';
+  }
+  function openMenu(){
+    burger.setAttribute('aria-expanded','true');
+    burger.setAttribute('aria-label','Fechar menu');
+    mobileNav.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  burger.addEventListener('click', () => burger.getAttribute('aria-expanded')==='true' ? closeMenu() : openMenu());
+  overlay.addEventListener('click', closeMenu);
+  mobileNav.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMenu));
+  document.addEventListener('keydown', (event) => { if(event.key === 'Escape') closeMenu(); });
+"""
+          new = """  // menu mobile — UX corrigida
+  const burger = document.getElementById('burger');
+  const mobileNav = document.getElementById('mobile-nav');
+  const overlay = document.getElementById('nav-overlay');
+  let lockedScrollY = 0;
+
+  function closeMenu(){
+    burger.setAttribute('aria-expanded','false');
+    burger.setAttribute('aria-label','Abrir menu');
+    mobileNav.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow='';
+    window.scrollTo(0, lockedScrollY);
+  }
+
+  function openMenu(){
+    lockedScrollY = window.scrollY;
+    burger.setAttribute('aria-expanded','true');
+    burger.setAttribute('aria-label','Fechar menu');
+    mobileNav.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+
+  burger.addEventListener('click', () => burger.getAttribute('aria-expanded')==='true' ? closeMenu() : openMenu());
+  overlay.addEventListener('click', closeMenu);
+  mobileNav.addEventListener('click', (event) => {
+    if(event.target.closest('a')) closeMenu();
+  });
+  document.addEventListener('keydown', (event) => { if(event.key === 'Escape') closeMenu(); });
+  window.addEventListener('resize', () => {
+    if(window.innerWidth > 900 && burger.getAttribute('aria-expanded') === 'true') closeMenu();
+  }, {passive:true});
+
+  // Sempre iniciar no Hero/topo após recarregar a página.
+  if('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  window.addEventListener('load', () => requestAnimationFrame(() => window.scrollTo(0,0)));
+  window.addEventListener('pageshow', (event) => { if(event.persisted) window.scrollTo(0,0); });
+"""
+          if old not in s:
+              raise SystemExit('Menu block not found exactly; refusing to modify index.html.')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit only if index changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: mobile menu width and reload position"
+          git push

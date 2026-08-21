@@ -1,0 +1,114 @@
+name: Etapa 1 - menu mobile
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Corrigir menu mobile e reload sem reconstruir o site
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          replacements = [
+            (
+              '.mobile-nav{width:min(88vw,360px);padding-left:24px;padding-right:24px;}',
+              '.mobile-nav{width:min(82vw,340px);padding-left:24px;padding-right:24px;}'
+            ),
+            (
+              '.nav-overlay{display:none; position:fixed; inset:0; background:rgba(42,21,24,.4); z-index:90; opacity:0; transition:opacity .3s ease;}',
+              '.nav-overlay{display:none; position:fixed; inset:0; background:rgba(42,21,24,.4); z-index:90; opacity:0; pointer-events:none; transition:opacity .3s ease;}'
+            ),
+            (
+              '.nav-overlay.open{display:block; opacity:1;}',
+              '.nav-overlay.open{display:block; opacity:1; pointer-events:auto;}'
+            )
+          ]
+
+          for old, new in replacements:
+            if old not in s:
+              raise SystemExit(f'Não encontrei o trecho esperado: {old}')
+            s = s.replace(old, new, 1)
+
+          old_js = """  // menu mobile
+  const burger = document.getElementById('burger');
+  const mobileNav = document.getElementById('mobile-nav');
+  const overlay = document.getElementById('nav-overlay');
+  function closeMenu(){
+    burger.setAttribute('aria-expanded','false');
+    burger.setAttribute('aria-label','Abrir menu');
+    mobileNav.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow='';
+  }
+  function openMenu(){
+    burger.setAttribute('aria-expanded','true');
+    burger.setAttribute('aria-label','Fechar menu');
+    mobileNav.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  burger.addEventListener('click', () => burger.getAttribute('aria-expanded')==='true' ? closeMenu() : openMenu());
+  overlay.addEventListener('click', closeMenu);
+  mobileNav.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMenu));
+  document.addEventListener('keydown', (event) => { if(event.key === 'Escape') closeMenu(); });
+"""
+
+          new_js = """  // menu mobile — etapa 1 UX
+  const burger = document.getElementById('burger');
+  const mobileNav = document.getElementById('mobile-nav');
+  const overlay = document.getElementById('nav-overlay');
+  let lockedScrollY = 0;
+  function closeMenu(){
+    burger.setAttribute('aria-expanded','false');
+    burger.setAttribute('aria-label','Abrir menu');
+    mobileNav.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow='';
+    window.scrollTo(0, lockedScrollY);
+  }
+  function openMenu(){
+    lockedScrollY = window.scrollY;
+    burger.setAttribute('aria-expanded','true');
+    burger.setAttribute('aria-label','Fechar menu');
+    mobileNav.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow='hidden';
+  }
+  burger.addEventListener('click', () => burger.getAttribute('aria-expanded')==='true' ? closeMenu() : openMenu());
+  overlay.addEventListener('click', closeMenu);
+  mobileNav.querySelectorAll('a').forEach(a => a.addEventListener('click', closeMenu));
+  document.addEventListener('keydown', (event) => { if(event.key === 'Escape') closeMenu(); });
+  window.addEventListener('resize', () => { if(window.innerWidth > 900 && burger.getAttribute('aria-expanded')==='true') closeMenu(); }, {passive:true});
+
+  // Ao recarregar, sempre iniciar no Hero/topo.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  window.addEventListener('load', () => requestAnimationFrame(() => window.scrollTo(0,0)));
+  window.addEventListener('pageshow', (event) => { if(event.persisted) window.scrollTo(0,0); });
+"""
+
+          if old_js not in s:
+            raise SystemExit('Bloco JavaScript original do menu não encontrado; nenhuma alteração feita.')
+          s = s.replace(old_js, new_js, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit alteração
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: etapa 1 menu mobile e reload"
+          git push

@@ -1,0 +1,34 @@
+name: Aplicar correção pontual do menu mobile
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'fix: aplicar menu mobile') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inserir somente o script do menu
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          tag='<script src="assets/js/mobile-menu-fix.js" defer></script>'
+          if tag not in s:
+              if '</body>' in s:
+                  s=s.replace('</body>', '  '+tag+'\n</body>', 1)
+              else:
+                  s += '\n'+tag+'\n'
+              p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commitar somente a correção
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets/js/mobile-menu-fix.js
+          git diff --cached --quiet || git commit -m "fix: aplicar menu mobile"
+          git push
